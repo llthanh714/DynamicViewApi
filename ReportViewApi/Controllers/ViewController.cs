@@ -1,4 +1,5 @@
 ﻿using Dapper;
+using DynamicViewApi.Models.Response;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using System.Text;
@@ -12,91 +13,114 @@ namespace DynamicViewApi.Controllers
     {
         private readonly string? sqlPassword = Environment.GetEnvironmentVariable("__DB_PASSWORD__", EnvironmentVariableTarget.Machine);
 
-        // Ánh xạ từ viết tắt sang toán tử SQL để đảm bảo an toàn
         private static readonly Dictionary<string, string> OperatorMap = new(StringComparer.OrdinalIgnoreCase)
         {
-            { "eq", "=" },
-            { "neq", "<>" },
-            { "lt", "<" },
-            { "lte", "<=" },
-            { "gt", ">" },
-            { "gte", ">=" },
-            { "like", "LIKE" }
+            { "eq", "=" }, { "neq", "<>" }, { "lt", "<" }, { "lte", "<=" },
+            { "gt", ">" }, { "gte", ">=" }, { "like", "LIKE" }
         };
 
         [HttpPost("query")]
         public async Task<IActionResult> QueryViewData([FromBody] Dictionary<string, object> request)
         {
-            // 1. Validate input and extract view_name
-            if (request == null || !request.TryGetValue("view_name", out var viewNameValue) || viewNameValue == null || string.IsNullOrWhiteSpace(viewNameValue.ToString()))
+            if (request == null || !request.TryGetValue("view_name", out var viewNameValue) || string.IsNullOrWhiteSpace(viewNameValue?.ToString()))
             {
-                return BadRequest("Invalid request. Please provide 'view_name'.");
+                return BadRequest(new ApiResponse { Success = false, Message = "Invalid request. Please provide 'view_name'." });
             }
 
-            var viewName = viewNameValue.ToString();
-            // Lọc ra các tham số, loại bỏ view_name
+            var viewName = viewNameValue.ToString()!;
             var parameters = request.Where(p => p.Key != "view_name");
+
+            var rawConnectionString = configuration.GetConnectionString("DefaultConnection");
+            if (string.IsNullOrEmpty(rawConnectionString))
+            {
+                return StatusCode(500, new ApiResponse { Success = false, Message = "Database connection string is not configured." });
+            }
+            if (string.IsNullOrEmpty(sqlPassword))
+            {
+                return StatusCode(500, new ApiResponse { Success = false, Message = "Database password environment variable is not set." });
+            }
+            var connectionString = rawConnectionString.Replace("__DB_PASSWORD__", sqlPassword);
 
             try
             {
                 var sqlBuilder = new StringBuilder($"SELECT * FROM {viewName} WHERE 1=1");
                 var dynamicParameters = new DynamicParameters();
+                var filterCriteria = new List<string>();
 
                 foreach (var param in parameters)
                 {
-                    if (param.Value == null || string.IsNullOrWhiteSpace(param.Value.ToString()))
-                    {
-                        continue;
-                    }
+                    if (param.Value == null || string.IsNullOrWhiteSpace(param.Value.ToString())) continue;
 
                     var keyParts = param.Key.Split(["__"], 2, StringSplitOptions.None);
                     var fieldName = keyParts[0];
-                    // Mặc định là 'eq' nếu không có toán tử được chỉ định
                     var opKey = keyParts.Length > 1 ? keyParts[1] : "eq";
 
                     if (!OperatorMap.TryGetValue(opKey, out var sqlOperator))
                     {
-                        return BadRequest($"Operator shorthand '{opKey}' is not allowed for key '{param.Key}'.");
+                        return BadRequest(new ApiResponse { Success = false, Message = $"Operator shorthand '{opKey}' is not allowed." });
                     }
 
-                    // Tạo tên tham số Dapper duy nhất để tránh xung đột
                     var paramName = $"@{param.Key.Replace("__", "_")}";
-
                     sqlBuilder.Append($" AND [{fieldName}] {sqlOperator} {paramName}");
+                    filterCriteria.Add($"{fieldName} {sqlOperator} {param.Value}");
 
-                    object? parameterValue = param.Value;
-                    if (parameterValue is JsonElement jsonElement)
-                    {
-                        parameterValue = ConvertJsonElement(jsonElement);
-                    }
-
-                    dynamicParameters.Add(paramName, parameterValue);
+                    var paramValue = param.Value is JsonElement jsonElement ? ConvertJsonElement(jsonElement) : param.Value;
+                    dynamicParameters.Add(paramName, paramValue);
                 }
-
-                var sqlQuery = sqlBuilder.ToString();
-                var rawConnectionString = configuration.GetConnectionString("DefaultConnection");
-                if (rawConnectionString == null)
-                {
-                    return StatusCode(500, "Database connection string is not configured.");
-                }
-                if (sqlPassword == null)
-                {
-                    return StatusCode(500, "Database password environment variable is not set.");
-                }
-                var connectionString = rawConnectionString.Replace("__DB_PASSWORD__", sqlPassword);
 
                 using var connection = new SqlConnection(connectionString);
-                var result = await connection.QueryAsync(sqlQuery, dynamicParameters);
-                return Ok(result);
+                await connection.OpenAsync();
+
+                // Lấy dữ liệu và metadata đồng thời
+                var queryTask = connection.QueryAsync(sqlBuilder.ToString(), dynamicParameters);
+                var metadataTask = GetViewMetadataAsync(connection, viewName, filterCriteria);
+
+                await Task.WhenAll(queryTask, metadataTask);
+
+                var result = await queryTask;
+                var metadata = await metadataTask;
+
+                return Ok(new ApiResponse
+                {
+                    Success = true,
+                    Message = "Query executed successfully.",
+                    Data = result,
+                    Metadata = metadata
+                });
             }
             catch (SqlException ex)
             {
-                return BadRequest($"Database query error: {ex.Message}");
+                return BadRequest(new ApiResponse { Success = false, Message = $"Database query error: {ex.Message}" });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, $"Internal server error: {ex.Message}");
+                return StatusCode(500, new ApiResponse { Success = false, Message = $"Internal server error: {ex.Message}" });
             }
+        }
+
+        private static async Task<Metadata> GetViewMetadataAsync(SqlConnection connection, string viewName, List<string> filters)
+        {
+            var metadata = new Metadata();
+            var sql = @"SELECT COLUMN_NAME, DATA_TYPE 
+                        FROM INFORMATION_SCHEMA.COLUMNS 
+                        WHERE TABLE_NAME = @ViewName";
+
+            var columns = await connection.QueryAsync(sql, new { ViewName = viewName });
+
+            foreach (var column in columns)
+            {
+                metadata.Fields[column.COLUMN_NAME] = new FieldInfo { Type = column.DATA_TYPE };
+            }
+
+            metadata.Summary = new SummaryInfo
+            {
+                Description = $"Metadata for view '{viewName}'",
+                TotalFields = metadata.Fields.Count,
+                DataSource = viewName,
+                FilterCriteria = filters.Count != 0 ? string.Join(" AND ", filters) : "None"
+            };
+
+            return metadata;
         }
 
         private static object? ConvertJsonElement(JsonElement element)
