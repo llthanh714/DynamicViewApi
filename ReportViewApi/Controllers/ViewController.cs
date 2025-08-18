@@ -1,5 +1,4 @@
 ﻿using Dapper;
-using DynamicViewApi.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using System.Text;
@@ -13,40 +12,65 @@ namespace DynamicViewApi.Controllers
     {
         private readonly string? sqlPassword = Environment.GetEnvironmentVariable("__DB_PASSWORD__", EnvironmentVariableTarget.Machine);
 
-        [HttpPost("query")]
-        public async Task<IActionResult> QueryViewData([FromBody] ViewQueryRequest request)
+        // Ánh xạ từ viết tắt sang toán tử SQL để đảm bảo an toàn
+        private static readonly Dictionary<string, string> OperatorMap = new(StringComparer.OrdinalIgnoreCase)
         {
-            // 1. Validate input
-            if (request == null || string.IsNullOrWhiteSpace(request.ViewName))
+            { "eq", "=" },
+            { "neq", "<>" },
+            { "lt", "<" },
+            { "lte", "<=" },
+            { "gt", ">" },
+            { "gte", ">=" },
+            { "like", "LIKE" }
+        };
+
+        [HttpPost("query")]
+        public async Task<IActionResult> QueryViewData([FromBody] Dictionary<string, object> request)
+        {
+            // 1. Validate input and extract view_name
+            if (request == null || !request.TryGetValue("view_name", out var viewNameValue) || viewNameValue == null || string.IsNullOrWhiteSpace(viewNameValue.ToString()))
             {
-                return BadRequest("Invalid request. Please provide 'viewName'.");
+                return BadRequest("Invalid request. Please provide 'view_name'.");
             }
+
+            var viewName = viewNameValue.ToString();
+            // Lọc ra các tham số, loại bỏ view_name
+            var parameters = request.Where(p => p.Key != "view_name");
 
             try
             {
-                var sqlBuilder = new StringBuilder($"SELECT * FROM {request.ViewName} WHERE 1=1");
+                var sqlBuilder = new StringBuilder($"SELECT * FROM {viewName} WHERE 1=1");
                 var dynamicParameters = new DynamicParameters();
 
-                // 3. Build dynamic WHERE clause from parameters
-                if (request.Parameters != null && request.Parameters.Count != 0)
+                foreach (var param in parameters)
                 {
-                    foreach (var param in request.Parameters)
+                    if (param.Value == null || string.IsNullOrWhiteSpace(param.Value.ToString()))
                     {
-                        // Only add condition if value is not empty
-                        if (param.Value != null && !string.IsNullOrWhiteSpace(param.Value.ToString()))
-                        {
-                            // Add AND condition to SQL statement
-                            sqlBuilder.Append($" AND [{param.Key}] = @{param.Key}");
-                            object? parameterValue = param.Value;
-
-                            if (param.Value is JsonElement jsonElement)
-                            {
-                                parameterValue = ConvertJsonElement(jsonElement);
-                            }
-
-                            dynamicParameters.Add($"@{param.Key}", parameterValue);
-                        }
+                        continue;
                     }
+
+                    var keyParts = param.Key.Split(["__"], 2, StringSplitOptions.None);
+                    var fieldName = keyParts[0];
+                    // Mặc định là 'eq' nếu không có toán tử được chỉ định
+                    var opKey = keyParts.Length > 1 ? keyParts[1] : "eq";
+
+                    if (!OperatorMap.TryGetValue(opKey, out var sqlOperator))
+                    {
+                        return BadRequest($"Operator shorthand '{opKey}' is not allowed for key '{param.Key}'.");
+                    }
+
+                    // Tạo tên tham số Dapper duy nhất để tránh xung đột
+                    var paramName = $"@{param.Key.Replace("__", "_")}";
+
+                    sqlBuilder.Append($" AND [{fieldName}] {sqlOperator} {paramName}");
+
+                    object? parameterValue = param.Value;
+                    if (parameterValue is JsonElement jsonElement)
+                    {
+                        parameterValue = ConvertJsonElement(jsonElement);
+                    }
+
+                    dynamicParameters.Add(paramName, parameterValue);
                 }
 
                 var sqlQuery = sqlBuilder.ToString();
@@ -61,56 +85,31 @@ namespace DynamicViewApi.Controllers
                 }
                 var connectionString = rawConnectionString.Replace("__DB_PASSWORD__", sqlPassword);
 
-                // 4. Execute the query
                 using var connection = new SqlConnection(connectionString);
                 var result = await connection.QueryAsync(sqlQuery, dynamicParameters);
                 return Ok(result);
             }
             catch (SqlException ex)
             {
-                // Return error if there's an SQL issue (e.g., invalid column name in parameters)
                 return BadRequest($"Database query error: {ex.Message}");
             }
             catch (Exception ex)
             {
-                // Catch other general errors
                 return StatusCode(500, $"Internal server error: {ex.Message}");
             }
         }
 
         private static object? ConvertJsonElement(JsonElement element)
         {
-            switch (element.ValueKind)
+            return element.ValueKind switch
             {
-                case JsonValueKind.String:
-                    // Nếu là chuỗi, thử chuyển thành DateTime nếu có thể
-                    if (element.TryGetDateTime(out var dateTime))
-                    {
-                        return dateTime;
-                    }
-                    return element.GetString();
-
-                case JsonValueKind.Number:
-                    // Dùng Decimal để có độ chính xác cao nhất với các con số
-                    return element.GetDecimal();
-
-                case JsonValueKind.True:
-                    return true;
-
-                case JsonValueKind.False:
-                    return false;
-
-                case JsonValueKind.Null:
-                case JsonValueKind.Undefined:
-                    return null;
-
-                // Đối với các kiểu phức tạp như Mảng (Array) hoặc Đối tượng (Object),
-                // chúng ta sẽ lấy biểu diễn chuỗi của chúng.
-                case JsonValueKind.Object:
-                case JsonValueKind.Array:
-                default:
-                    return element.ToString();
-            }
+                JsonValueKind.String => element.TryGetDateTime(out var dateTime) ? dateTime : element.GetString(),
+                JsonValueKind.Number => element.GetDecimal(),
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                JsonValueKind.Null or JsonValueKind.Undefined => null,
+                _ => element.ToString(),
+            };
         }
     }
 }
