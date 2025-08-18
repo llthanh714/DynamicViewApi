@@ -3,6 +3,7 @@ using DynamicViewApi.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using System.Text;
+using System.Text.Json;
 
 namespace DynamicViewApi.Controllers
 {
@@ -12,13 +13,6 @@ namespace DynamicViewApi.Controllers
     {
         private readonly string? sqlPassword = Environment.GetEnvironmentVariable("__DB_PASSWORD__", EnvironmentVariableTarget.Machine);
 
-        // List of allowed views to query for security
-        // IMPORTANT: Only add views here that you want to expose via the API
-        private readonly HashSet<string> _allowedViews = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "v_patients"
-        };
-
         [HttpPost("query")]
         public async Task<IActionResult> QueryViewData([FromBody] ViewQueryRequest request)
         {
@@ -26,12 +20,6 @@ namespace DynamicViewApi.Controllers
             if (request == null || string.IsNullOrWhiteSpace(request.ViewName))
             {
                 return BadRequest("Invalid request. Please provide 'viewName'.");
-            }
-
-            // 2. SECURITY CHECK: Ensure viewName is in the allowed list
-            if (!_allowedViews.Contains(request.ViewName))
-            {
-                return BadRequest($"Access to view '{request.ViewName}' is not permitted.");
             }
 
             try
@@ -49,10 +37,14 @@ namespace DynamicViewApi.Controllers
                         {
                             // Add AND condition to SQL statement
                             sqlBuilder.Append($" AND [{param.Key}] = @{param.Key}");
+                            object? parameterValue = param.Value;
 
-                            // Add parameter to Dapper's DynamicParameters
-                            // to prevent SQL Injection
-                            dynamicParameters.Add($"@{param.Key}", param.Value);
+                            if (param.Value is JsonElement jsonElement)
+                            {
+                                parameterValue = ConvertJsonElement(jsonElement);
+                            }
+
+                            dynamicParameters.Add($"@{param.Key}", parameterValue);
                         }
                     }
                 }
@@ -83,6 +75,41 @@ namespace DynamicViewApi.Controllers
             {
                 // Catch other general errors
                 return StatusCode(500, $"Internal server error: {ex.Message}");
+            }
+        }
+
+        private static object? ConvertJsonElement(JsonElement element)
+        {
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.String:
+                    // Nếu là chuỗi, thử chuyển thành DateTime nếu có thể
+                    if (element.TryGetDateTime(out var dateTime))
+                    {
+                        return dateTime;
+                    }
+                    return element.GetString();
+
+                case JsonValueKind.Number:
+                    // Dùng Decimal để có độ chính xác cao nhất với các con số
+                    return element.GetDecimal();
+
+                case JsonValueKind.True:
+                    return true;
+
+                case JsonValueKind.False:
+                    return false;
+
+                case JsonValueKind.Null:
+                case JsonValueKind.Undefined:
+                    return null;
+
+                // Đối với các kiểu phức tạp như Mảng (Array) hoặc Đối tượng (Object),
+                // chúng ta sẽ lấy biểu diễn chuỗi của chúng.
+                case JsonValueKind.Object:
+                case JsonValueKind.Array:
+                default:
+                    return element.ToString();
             }
         }
     }
