@@ -1,6 +1,4 @@
-﻿using System.Reflection;
-
-namespace DynamicViewApi.Models.Response
+﻿namespace DynamicViewApi.Models.Response
 {
     public class Metadata
     {

@@ -1,35 +1,38 @@
+﻿using DynamicViewApi.Middleware; // Thêm dòng này
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using System.Net;
-using System.Security.Cryptography.X509Certificates;
 
 var builder = WebApplication.CreateBuilder(args);
 
-
-var kestrelCertPassword = Environment.GetEnvironmentVariable("__KESTREL_CERT_PASSWORD__", EnvironmentVariableTarget.Machine);
-
+// Cấu hình Kestrel để lắng nghe trên cả HTTP và HTTPS
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
+    // Cấu hình HTTPS trên cổng 7274
     var certConfig = builder.Configuration.GetSection("Kestrel:Certificate");
     var certPath = certConfig["Path"];
+    var kestrelCertPassword = Environment.GetEnvironmentVariable("__KESTREL_CERT_PASSWORD__", EnvironmentVariableTarget.Machine);
     var certPassword = certConfig["Password"]?.Replace("__KESTREL_CERT_PASSWORD__", kestrelCertPassword);
 
-    if (string.IsNullOrEmpty(certPath) || string.IsNullOrEmpty(certPassword))
+    if (!string.IsNullOrEmpty(certPath) && !string.IsNullOrEmpty(certPassword))
     {
-        Console.WriteLine("Kestrel certificate path or password is not configured. HTTPS will not be available.");
-        return;
+        serverOptions.Listen(IPAddress.Any, 7274, listenOptions =>
+        {
+            listenOptions.Protocols = HttpProtocols.Http1AndHttp2AndHttp3;
+            listenOptions.UseHttps(certPath, certPassword);
+        });
+    }
+    else
+    {
+        Console.WriteLine("Kestrel certificate not configured. HTTPS will not be available.");
     }
 
-    serverOptions.ConfigureHttpsDefaults(https =>
-    {
-        https.ServerCertificate = new X509Certificate2(certPath, certPassword);
-    });
-
+    // Cấu hình HTTP trên cổng 7273
     serverOptions.Listen(IPAddress.Any, 7273, listenOptions =>
     {
-        listenOptions.Protocols = HttpProtocols.Http1AndHttp2AndHttp3;
-        listenOptions.UseHttps();
+        listenOptions.Protocols = HttpProtocols.Http1;
     });
 });
+
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -44,7 +47,11 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+// KHÔNG sử dụng UseHttpsRedirection nữa
+// app.UseHttpsRedirection();
+
+// Sử dụng Middleware kiểm tra IP
+app.UseMiddleware<IPWhitelistMiddleware>();
 
 app.UseAuthorization();
 
