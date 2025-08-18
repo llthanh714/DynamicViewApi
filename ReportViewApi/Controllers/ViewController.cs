@@ -8,7 +8,7 @@ using System.Text.Json;
 namespace DynamicViewApi.Controllers
 {
     [ApiController]
-    [Route("api/view")]
+    [Route("view")]
     public class ViewController(IConfiguration configuration) : ControllerBase
     {
         private readonly string? sqlPassword = Environment.GetEnvironmentVariable("__DB_PASSWORD__", EnvironmentVariableTarget.Machine);
