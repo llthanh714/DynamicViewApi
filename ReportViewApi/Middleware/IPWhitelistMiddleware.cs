@@ -25,7 +25,7 @@ namespace DynamicViewApi.Middleware
                 {
                     // Nếu IP không có trong danh sách trắng, trả về lỗi 403 Forbidden
                     context.Response.StatusCode = (int)HttpStatusCode.Forbidden;
-                    await context.Response.WriteAsync("Forbidden: Your IP address is not allowed for HTTP access.");
+                    await context.Response.WriteAsync($"Forbidden: Your IP address ({remoteIp}) is not allowed for HTTP access.");
                     return;
                 }
             }
