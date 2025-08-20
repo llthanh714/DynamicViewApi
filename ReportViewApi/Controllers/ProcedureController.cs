@@ -9,7 +9,7 @@ namespace DynamicViewApi.Controllers
 {
     [ApiController]
     [Route("sp")]
-    public class StoredProcedureController(IConfiguration configuration) : ControllerBase
+    public class ProcedureController(IConfiguration configuration) : ControllerBase
     {
         private readonly string? sqlPassword = Environment.GetEnvironmentVariable("__DB_PASSWORD__", EnvironmentVariableTarget.Machine);
 
