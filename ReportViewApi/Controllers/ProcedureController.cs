@@ -1,5 +1,6 @@
 ﻿using Dapper;
 using DynamicViewApi.Models.Response;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using System.Data;
@@ -7,6 +8,7 @@ using System.Text.Json;
 
 namespace DynamicViewApi.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("sp")]
     public class ProcedureController(IConfiguration configuration) : ControllerBase

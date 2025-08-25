@@ -1,11 +1,13 @@
-﻿using DynamicViewApi.Models.Response;
-using DynamicViewApi.Models.Config; // Thêm dòng này
+﻿using DynamicViewApi.Models.Config; // Thêm dòng này
+using DynamicViewApi.Models.Response;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Text;
 using System.Text.Json;
 
 namespace DynamicViewApi.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("proxy")]
     public class ProxyController(IHttpClientFactory httpClientFactory, IConfiguration configuration) : ControllerBase
