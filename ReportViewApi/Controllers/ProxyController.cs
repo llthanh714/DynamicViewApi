@@ -61,12 +61,7 @@ namespace DynamicViewApi.Controllers
                 if (response.IsSuccessStatusCode)
                 {
                     var responseData = await response.Content.ReadFromJsonAsync<object>();
-                    return Ok(new ApiResponse
-                    {
-                        Success = true,
-                        Message = "Request forwarded successfully.",
-                        Data = responseData
-                    });
+                    return Ok(responseData);
                 }
                 else
                 {
