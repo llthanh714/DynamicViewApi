@@ -58,6 +58,12 @@ namespace DynamicViewApi.Controllers
                     requestMessage.Content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
                 }
 
+                // Chuyển tiếp header Authorization nếu có
+                if (Request.Headers.TryGetValue("Authorization", out var authHeaderValue))
+                {
+                    requestMessage.Headers.Add("Authorization", authHeaderValue.ToString());
+                }
+
                 var response = await client.SendAsync(requestMessage);
 
                 if (response.IsSuccessStatusCode)
