@@ -43,6 +43,8 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
+builder.Services.Configure<DynamicViewApi.Models.Config.ProxySettings>(builder.Configuration.GetSection("ProxySettings"));
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())

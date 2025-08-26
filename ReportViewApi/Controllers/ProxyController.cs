@@ -2,6 +2,7 @@
 using DynamicViewApi.Models.Response;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using System.Text;
 using System.Text.Json;
 
@@ -10,8 +11,10 @@ namespace DynamicViewApi.Controllers
     [Authorize]
     [ApiController]
     [Route("proxy")]
-    public class ProxyController(IHttpClientFactory httpClientFactory, IConfiguration configuration) : ControllerBase
+    public class ProxyController(IHttpClientFactory httpClientFactory, IOptions<ProxySettings> proxySettingsOptions) : ControllerBase
     {
+        private readonly ProxySettings _proxySettings = proxySettingsOptions.Value;
+
         [HttpPost("forward")]
         public async Task<IActionResult> ForwardRequest([FromBody] Dictionary<string, object> request)
         {
@@ -28,15 +31,14 @@ namespace DynamicViewApi.Controllers
             var payload = request.TryGetValue("payload", out object? value) ? value : null;
 
             // 2. Lấy danh sách cấu hình Endpoints
-            var proxySettings = configuration.GetSection("ProxySettings").Get<ProxySettings>();
-            if (proxySettings == null || proxySettings.Endpoints.Count == 0)
+            if (_proxySettings == null || _proxySettings.Endpoints.Count == 0)
             {
                 return StatusCode(500, new ApiResponse { Success = false, Message = "Proxy endpoints are not configured." });
             }
 
             // 3. Tìm BaseUrl phù hợp dựa trên orgcode
-            var endpointConfig = proxySettings.Endpoints.FirstOrDefault(e => e.OrgCode.Equals(orgcode, StringComparison.OrdinalIgnoreCase))
-                                 ?? proxySettings.Endpoints.FirstOrDefault(e => e.OrgCode.Equals("default", StringComparison.OrdinalIgnoreCase));
+            var endpointConfig = _proxySettings.Endpoints.FirstOrDefault(e => e.OrgCode.Equals(orgcode, StringComparison.OrdinalIgnoreCase))
+                                 ?? _proxySettings.Endpoints.FirstOrDefault(e => e.OrgCode.Equals("default", StringComparison.OrdinalIgnoreCase));
 
             if (endpointConfig == null || string.IsNullOrEmpty(endpointConfig.BaseUrl))
             {
