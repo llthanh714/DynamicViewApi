@@ -9,7 +9,7 @@ using System.Text;
 namespace DynamicViewApi.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("auth")]
     public class AuthController(IConfiguration configuration) : ControllerBase
     {
         private readonly string? sqlPassword = Environment.GetEnvironmentVariable("__DB_PASSWORD__", EnvironmentVariableTarget.Machine);
@@ -28,12 +28,17 @@ namespace DynamicViewApi.Controllers
 
             // Tìm người dùng trong cơ sở dữ liệu
             var sql = @"SELECT 
-                            id AS Guid, 
-                            code AS Username,
-                            password AS PasswordHash, 
-                            '' AS Role 
-                        FROM users
-                        WHERE code = @Username AND islocked = 0";
+                            u.id AS Guid, 
+                            u.code AS Username,
+                            u.password AS PasswordHash, 
+                            r.name AS Role 
+                        FROM
+	                        users u
+	                        JOIN users_roles r ON u.id = r.users_id
+                        WHERE
+	                        u.code = @Username
+	                        AND u.islocked = 0
+	                        AND r.name = 'SYSADMIN'";
             var user = await connection.QuerySingleOrDefaultAsync<UserModel>(sql, new { model.Username });
 
             if (user == null)

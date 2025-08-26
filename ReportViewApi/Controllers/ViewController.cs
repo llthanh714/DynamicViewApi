@@ -8,7 +8,6 @@ using System.Text.Json;
 
 namespace DynamicViewApi.Controllers
 {
-    [Authorize]
     [ApiController]
     [Route("view")]
     public class ViewController(IConfiguration configuration) : ControllerBase
