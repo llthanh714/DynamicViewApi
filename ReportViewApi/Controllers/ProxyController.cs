@@ -17,13 +17,13 @@ namespace DynamicViewApi.Controllers
         {
             // 1. Kiểm tra các tham số bắt buộc
             if (request == null
-                || !request.TryGetValue("orguid", out var orguidValue) || string.IsNullOrWhiteSpace(orguidValue?.ToString())
+                || !request.TryGetValue("orgcode", out var orgcodeValue) || string.IsNullOrWhiteSpace(orgcodeValue?.ToString())
                 || !request.TryGetValue("endpoint", out var endpointValue) || string.IsNullOrWhiteSpace(endpointValue?.ToString()))
             {
-                return BadRequest(new ApiResponse { Success = false, Message = "Invalid request. Please provide 'orguid' and 'endpoint'." });
+                return BadRequest(new ApiResponse { Success = false, Message = "Invalid request. Please provide 'orgcode' and 'endpoint'." });
             }
 
-            var orguid = orguidValue.ToString()!;
+            var orgcode = orgcodeValue.ToString()!;
             var endpointPath = endpointValue.ToString()!;
             var payload = request.TryGetValue("payload", out object? value) ? value : null;
 
@@ -34,13 +34,13 @@ namespace DynamicViewApi.Controllers
                 return StatusCode(500, new ApiResponse { Success = false, Message = "Proxy endpoints are not configured." });
             }
 
-            // 3. Tìm BaseUrl phù hợp dựa trên orguid
-            var endpointConfig = proxySettings.Endpoints.FirstOrDefault(e => e.Orguid.Equals(orguid, StringComparison.OrdinalIgnoreCase))
-                                 ?? proxySettings.Endpoints.FirstOrDefault(e => e.Orguid.Equals("default", StringComparison.OrdinalIgnoreCase));
+            // 3. Tìm BaseUrl phù hợp dựa trên orgcode
+            var endpointConfig = proxySettings.Endpoints.FirstOrDefault(e => e.OrgCode.Equals(orgcode, StringComparison.OrdinalIgnoreCase))
+                                 ?? proxySettings.Endpoints.FirstOrDefault(e => e.OrgCode.Equals("default", StringComparison.OrdinalIgnoreCase));
 
             if (endpointConfig == null || string.IsNullOrEmpty(endpointConfig.BaseUrl))
             {
-                return BadRequest(new ApiResponse { Success = false, Message = $"No proxy endpoint configured for orguid '{orguid}' or a default endpoint." });
+                return BadRequest(new ApiResponse { Success = false, Message = $"No proxy endpoint configured for orguid '{orgcode}' or a default endpoint." });
             }
 
             var baseUrl = endpointConfig.BaseUrl;

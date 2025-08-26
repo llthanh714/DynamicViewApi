@@ -7,7 +7,7 @@
 
     public class ProxyEndpoint
     {
-        public string Orguid { get; set; } = string.Empty;
+        public string OrgCode { get; set; } = string.Empty;
         public string BaseUrl { get; set; } = string.Empty;
     }
 }
